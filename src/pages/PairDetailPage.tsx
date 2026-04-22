@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { PriceChart } from "@/components/PriceChart"
 import { getMarketById } from "@/data/markets"
 
 export function PairDetailPage() {
@@ -48,6 +49,8 @@ export function PairDetailPage() {
           Statik veri
         </Badge>
       </div>
+
+      <PriceChart marketId={market.id} symbol={market.symbol} />
 
       <Card>
         <CardHeader>
