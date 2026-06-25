@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -12,13 +12,44 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { PriceChart } from "@/components/PriceChart"
-import { getMarketById } from "@/data/markets"
+import { useLiveTickers } from "@/hooks/useLiveTickers"
+
+function formatPrice(value: string | number): string {
+  const n = typeof value === "string" ? parseFloat(value) : value
+  if (isNaN(n)) return "—"
+  if (n >= 1000) return n.toLocaleString("tr-TR", { maximumFractionDigits: 2 })
+  if (n >= 1) return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return n.toLocaleString("tr-TR", { minimumFractionDigits: 4, maximumFractionDigits: 6 })
+}
+
+function formatPercent(value: string | number): string {
+  const n = typeof value === "string" ? parseFloat(value) : value
+  if (isNaN(n)) return "—"
+  const sign = n >= 0 ? "+" : ""
+  return `${sign}${n.toFixed(2)}%`
+}
+
+function formatVolume(value: string | number): string {
+  const n = typeof value === "string" ? parseFloat(value) : value
+  if (isNaN(n)) return "—"
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+  return n.toFixed(0)
+}
 
 export function PairDetailPage() {
   const { pairId } = useParams<{ pairId: string }>()
-  const market = pairId ? getMarketById(pairId) : undefined
+  const symbol = pairId?.toUpperCase() ?? ""
 
-  if (!market) {
+  // Geçerli bir Binance sembolü mü?
+  const isValidSymbol = /^[A-Z0-9]+$/.test(symbol) && symbol.length >= 4
+
+  const { tickers, loading, error } = useLiveTickers(
+    isValidSymbol ? [symbol] : [],
+  )
+
+  if (!isValidSymbol) {
     return (
       <div className="space-y-6">
         <Button render={<Link to="/" />} variant="ghost" size="sm" className="gap-2">
@@ -29,14 +60,23 @@ export function PairDetailPage() {
           <CardHeader>
             <CardTitle>Çift bulunamadı</CardTitle>
             <CardDescription>
-              Aradığınız işlem çifti bu demoda yok. Ana sayfadan bir çift
-              seçin.
+              Aradığınız işlem çifti geçersiz. Ana sayfadan bir çift seçin.
             </CardDescription>
           </CardHeader>
         </Card>
       </div>
     )
   }
+
+  const t = tickers[symbol]
+  const lastPrice = t ? parseFloat(t.lastPrice) : null
+  const changePercent = t ? parseFloat(t.priceChangePercent) : null
+  const high24h = t ? parseFloat(t.highPrice) : null
+  const low24h = t ? parseFloat(t.lowPrice) : null
+  const volume24h = t ? parseFloat(t.quoteVolume) : null
+
+  // BTCUSDT → BTC
+  const baseAsset = symbol.replace(/USDT$/i, "")
 
   return (
     <div className="space-y-8">
@@ -46,37 +86,63 @@ export function PairDetailPage() {
           Piyasalara dön
         </Button>
         <Badge variant="outline" className="w-fit">
-          Statik veri
+          {loading ? "Yükleniyor…" : "Canlı veri · Binance"}
         </Badge>
       </div>
 
-      <PriceChart marketId={market.id} symbol={market.symbol} />
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <PriceChart symbol={symbol} />
 
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle className="text-2xl sm:text-3xl">{market.symbol}</CardTitle>
-            <Badge>{market.base}</Badge>
+            <CardTitle className="text-2xl sm:text-3xl">{baseAsset}</CardTitle>
+            <Badge>USDT</Badge>
           </div>
-          <CardDescription className="text-base">{market.tagline}</CardDescription>
+          <CardDescription className="text-base">
+            {symbol} · Binance canlı piyasa verisi
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-            {market.description}
+            {baseAsset}/USDT işlem çifti için canlı fiyat, 24 saatlik istatistikler ve
+            interaktif grafik.
           </p>
           <Separator />
           <div>
             <h2 className="mb-3 text-sm font-medium text-foreground">
-              Örnek piyasa özeti
+              {loading ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Piyasa özeti yükleniyor…
+                </span>
+              ) : (
+                "Canlı piyasa özeti"
+              )}
             </h2>
             <dl className="grid gap-4 sm:grid-cols-2">
               {(
                 [
-                  ["Son fiyat", `${market.stats.lastPrice} ${market.quote}`],
-                  ["24s değişim", market.stats.change24h],
-                  ["24s en yüksek", `${market.stats.high24h} ${market.quote}`],
-                  ["24s en düşük", `${market.stats.low24h} ${market.quote}`],
-                  ["24s hacim", market.stats.volume24h],
+                  ["Son fiyat", lastPrice !== null ? `$${formatPrice(lastPrice)}` : "—"],
+                  ["24s değişim", changePercent !== null ? formatPercent(changePercent) : "—"],
+                  [
+                    "24s en yüksek",
+                    high24h !== null ? `$${formatPrice(high24h)}` : "—",
+                  ],
+                  [
+                    "24s en düşük",
+                    low24h !== null ? `$${formatPrice(low24h)}` : "—",
+                  ],
+                  [
+                    "24s hacim",
+                    volume24h !== null ? `${formatVolume(volume24h)} USDT` : "—",
+                  ],
                 ] as const
               ).map(([label, value]) => (
                 <div
@@ -84,7 +150,17 @@ export function PairDetailPage() {
                   className="rounded-lg border border-border/80 bg-muted/30 px-4 py-3"
                 >
                   <dt className="text-xs text-muted-foreground">{label}</dt>
-                  <dd className="mt-1 font-medium tabular-nums">{value}</dd>
+                  <dd
+                    className={
+                      label === "24s değişim" && changePercent !== null && changePercent < 0
+                        ? "mt-1 font-medium tabular-nums text-destructive"
+                        : label === "24s değişim"
+                          ? "mt-1 font-medium tabular-nums text-emerald-600 dark:text-emerald-400"
+                          : "mt-1 font-medium tabular-nums"
+                    }
+                  >
+                    {value}
+                  </dd>
                 </div>
               ))}
             </dl>

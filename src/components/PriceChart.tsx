@@ -7,13 +7,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { ChartArea, ChartCandlestick } from "lucide-react"
+import { ChartArea, ChartCandlestick, Loader2, AlertTriangle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import type { MarketId } from "@/data/markets"
 import {
   INTERVALS,
-  getChartData,
   type Interval,
   type CandlePoint,
 } from "@/data/chart-data"
@@ -31,6 +29,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useLiveChart } from "@/hooks/useLiveChart"
 
 type ChartType = "area" | "candle"
 
@@ -44,13 +43,10 @@ const chartConfig = {
 } satisfies ChartConfig
 
 interface PriceChartProps {
-  marketId: MarketId
   symbol: string
 }
 
-/* ------------------------------------------------------------------ */
-/*  Custom candlestick shape for recharts Bar (range: [bodyLow, bodyHigh])  */
-/* ------------------------------------------------------------------ */
+// Özel mum şekli
 function CandleShape(props: Record<string, unknown>) {
   const { x, y, width, height, payload } = props as {
     x: number
@@ -103,9 +99,7 @@ function CandleShape(props: Record<string, unknown>) {
   )
 }
 
-/* ------------------------------------------------------------------ */
-/*  OHLC tooltip for candlestick mode                                  */
-/* ------------------------------------------------------------------ */
+// Mum grafiği için OHLC tooltip
 function CandleTooltipContent({ active, payload }: Record<string, unknown>) {
   if (!active || !Array.isArray(payload) || !payload.length) return null
   const d = (payload as { payload?: CandlePoint }[])[0]?.payload
@@ -150,13 +144,10 @@ function CandleTooltipContent({ active, payload }: Record<string, unknown>) {
   )
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main component                                                     */
-/* ------------------------------------------------------------------ */
-export function PriceChart({ marketId, symbol }: PriceChartProps) {
+export function PriceChart({ symbol }: PriceChartProps) {
   const [interval, setInterval] = useState<Interval>("1h")
   const [chartType, setChartType] = useState<ChartType>("area")
-  const rawData = getChartData(marketId, interval)
+  const { data: rawData, loading, error, refetch } = useLiveChart(symbol, interval)
 
   const data = rawData.map((d) => ({
     ...d,
@@ -169,7 +160,8 @@ export function PriceChart({ marketId, symbol }: PriceChartProps) {
   const allPrices = data.flatMap((d) => [d.high, d.low])
   const minPrice = Math.min(...allPrices)
   const maxPrice = Math.max(...allPrices)
-  const pricePad = (maxPrice - minPrice) * 0.08
+  const pricePad =
+    allPrices.length > 0 ? (maxPrice - minPrice) * 0.08 : 0
   const domainLow = +(minPrice - pricePad).toFixed(2)
   const domainHigh = +(maxPrice + pricePad).toFixed(2)
 
@@ -236,91 +228,119 @@ export function PriceChart({ marketId, symbol }: PriceChartProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={chartConfig} className="aspect-[2/1] w-full">
-          <ComposedChart
-            data={data}
-            margin={{ top: 8, right: 4, bottom: 0, left: 4 }}
-          >
-            <defs>
-              <linearGradient id="fillClose" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={areaColor} stopOpacity={0.3} />
-                <stop
-                  offset="95%"
-                  stopColor={areaColor}
-                  stopOpacity={0.02}
-                />
-              </linearGradient>
-            </defs>
-            <CartesianGrid vertical={false} />
-            <XAxis
-              dataKey="time"
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
-              minTickGap={32}
-              fontSize={11}
-            />
-            <YAxis
-              yAxisId="price"
-              orientation="right"
-              domain={[domainLow, domainHigh]}
-              tickLine={false}
-              axisLine={false}
-              tickMargin={4}
-              fontSize={11}
-              tickFormatter={(v: number) => v.toLocaleString("tr-TR")}
-            />
-            <YAxis yAxisId="vol" orientation="left" hide />
-            <ChartTooltip
-              content={
-                chartType === "candle" ? (
-                  <CandleTooltipContent />
-                ) : (
-                  <ChartTooltipContent
-                    labelFormatter={(label) => `Zaman: ${label}`}
-                    formatter={(value, name) => {
-                      const n =
-                        typeof value === "number"
-                          ? value.toLocaleString("tr-TR")
-                          : value
-                      const l = name === "close" ? "Kapanış" : "Hacim"
-                      return (
-                        <span>
-                          {l}: <strong>{String(n)}</strong>
-                        </span>
-                      )
-                    }}
+        {error && (
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-6 text-sm text-destructive">
+            <AlertTriangle className="size-5" />
+            <span>{error}</span>
+            <button
+              onClick={refetch}
+              className="mt-1 text-xs underline underline-offset-2 hover:text-destructive/80"
+            >
+              Tekrar dene
+            </button>
+          </div>
+        )}
+
+        {loading && !error && (
+          <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            <span>Grafik verisi yükleniyor…</span>
+          </div>
+        )}
+
+        {!loading && !error && data.length === 0 && (
+          <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+            Bu aralık için veri bulunamadı.
+          </div>
+        )}
+
+        {!loading && !error && data.length > 0 && (
+          <ChartContainer config={chartConfig} className="aspect-[2/1] w-full">
+            <ComposedChart
+              data={data}
+              margin={{ top: 8, right: 4, bottom: 0, left: 4 }}
+            >
+              <defs>
+                <linearGradient id="fillClose" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={areaColor} stopOpacity={0.3} />
+                  <stop
+                    offset="95%"
+                    stopColor={areaColor}
+                    stopOpacity={0.02}
                   />
-                )
-              }
-            />
-            <Bar
-              yAxisId="vol"
-              dataKey="volume"
-              fill="var(--color-volume)"
-              opacity={0.25}
-              radius={[2, 2, 0, 0]}
-            />
-            {chartType === "area" ? (
-              <Area
-                yAxisId="price"
-                dataKey="close"
-                type="monotone"
-                stroke={areaColor}
-                strokeWidth={2}
-                fill="url(#fillClose)"
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="time"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                minTickGap={32}
+                fontSize={11}
               />
-            ) : (
+              <YAxis
+                yAxisId="price"
+                orientation="right"
+                domain={[domainLow, domainHigh]}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={4}
+                fontSize={11}
+                tickFormatter={(v: number) => v.toLocaleString("tr-TR")}
+              />
+              <YAxis yAxisId="vol" orientation="left" hide />
+              <ChartTooltip
+                content={
+                  chartType === "candle" ? (
+                    <CandleTooltipContent />
+                  ) : (
+                    <ChartTooltipContent
+                      labelFormatter={(label) => `Zaman: ${label}`}
+                      formatter={(value, name) => {
+                        const n =
+                          typeof value === "number"
+                            ? value.toLocaleString("tr-TR")
+                            : value
+                        const l = name === "close" ? "Kapanış" : "Hacim"
+                        return (
+                          <span>
+                            {l}: <strong>{String(n)}</strong>
+                          </span>
+                        )
+                      }}
+                    />
+                  )
+                }
+              />
               <Bar
-                yAxisId="price"
-                dataKey="candleBody"
-                shape={<CandleShape />}
-                activeBar={false}
-                isAnimationActive={false}
+                yAxisId="vol"
+                dataKey="volume"
+                fill="var(--color-volume)"
+                opacity={0.25}
+                radius={[2, 2, 0, 0]}
               />
-            )}
-          </ComposedChart>
-        </ChartContainer>
+              {chartType === "area" ? (
+                <Area
+                  yAxisId="price"
+                  dataKey="close"
+                  type="monotone"
+                  stroke={areaColor}
+                  strokeWidth={2}
+                  fill="url(#fillClose)"
+                />
+              ) : (
+                <Bar
+                  yAxisId="price"
+                  dataKey="candleBody"
+                  shape={<CandleShape />}
+                  activeBar={false}
+                  isAnimationActive={false}
+                />
+              )}
+            </ComposedChart>
+          </ChartContainer>
+        )}
       </CardContent>
     </Card>
   )
